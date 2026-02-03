@@ -3,10 +3,10 @@ from tkinter import ttk, messagebox, filedialog
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LightSource
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-import sys # Added for clean exit
+import sys
 
 # Try to import scikit-image for smooth meshing
 try:
@@ -18,10 +18,10 @@ except ImportError:
 class TPMSUtility:
     def __init__(self, root):
         self.root = root
-        self.root.title("TPMS Utility")
+        self.root.title("TPMS Utility v24.0")
         self.root.geometry("1200x950")
         
-        # --- FIX: Handle Window Close Event ---
+        # --- CLEAN EXIT FIX ---
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         if not HAS_SKIMAGE:
@@ -38,25 +38,22 @@ class TPMSUtility:
         self.cell_size = tk.DoubleVar(value=10.0)
         self.thickness = tk.DoubleVar(value=1.0)
         
+        # This slider controls EXPORT resolution
         self.resolution = tk.IntVar(value=60)
         self.smooth_iters = tk.IntVar(value=5)
 
         self.res_feedback = tk.StringVar(value="Checking...")
 
         self.setup_ui()
-        self.check_resolution_safety() # Initial check
-        self.refresh_3d_preview()
+        self.check_resolution_safety()
 
     def on_closing(self):
-        """Cleanly shuts down matplotlib and the python process"""
         try:
-            plt.close('all') # Close matplotlib figures to free memory
-            self.root.quit() # Stop the mainloop
-            self.root.destroy() # Destroy the window
-        except:
-            pass
-        finally:
-            sys.exit(0) # Force kill the process
+            plt.close('all')
+            self.root.quit()
+            self.root.destroy()
+        except: pass
+        finally: sys.exit(0)
 
     def setup_ui(self):
         self.paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -75,7 +72,6 @@ class TPMSUtility:
         # 2. Dimensions
         params = ttk.LabelFrame(left, text="Dimensions (mm)", padding="10"); params.pack(fill=tk.X, pady=5)
         
-        # Trace for safety check
         for v in [self.dim_x, self.dim_y, self.dim_z, self.thickness, self.resolution]:
             v.trace_add("write", lambda *args: self.check_resolution_safety())
 
@@ -86,18 +82,19 @@ class TPMSUtility:
         # 3. Quality & Safety
         quality = ttk.LabelFrame(left, text="Mesh Quality & Safety", padding="10"); quality.pack(fill=tk.X, pady=5)
         
-        ttk.Label(quality, text="Export Resolution:").pack(anchor="w")
+        ttk.Label(quality, text="Export Resolution (Voxels):").pack(anchor="w")
         scale = tk.Scale(quality, from_=10, to=200, variable=self.resolution, orient="horizontal")
         scale.pack(fill=tk.X)
         
         self.lbl_safe = ttk.Label(quality, textvariable=self.res_feedback, foreground="red", wraplength=250)
         self.lbl_safe.pack(fill=tk.X, pady=(5, 10))
         
-        ttk.Button(quality, text="[AUTO] Fix Resolution", command=self.set_safe_res).pack(fill=tk.X, pady=2)
+        ttk.Button(quality, text="[AUTO] Fix Export Resolution", command=self.set_safe_res).pack(fill=tk.X, pady=2)
 
         ttk.Label(quality, text="Smoothing Iterations:").pack(anchor="w", pady=(5,0))
         tk.Scale(quality, from_=0, to=50, variable=self.smooth_iters, orient="horizontal").pack(fill=tk.X)
         
+        # --- THE BUTTON ---
         ttk.Button(left, text=">> Update Preview", command=self.refresh_3d_preview).pack(fill=tk.X, pady=10)
 
         # 4. Export
@@ -106,14 +103,14 @@ class TPMSUtility:
         
         ttk.Button(export, text="Export OBJ", command=lambda: self.process("obj")).pack(fill=tk.X, pady=2)
         ttk.Button(export, text="Export STL", command=lambda: self.process("stl")).pack(fill=tk.X, pady=2)
-        ttk.Button(export, text="Export XYZ", command=lambda: self.process("xyz")).pack(fill=tk.X, pady=2)
 
-        self.status = ttk.Label(left, text="Ready", foreground="#2ecc71"); self.status.pack(pady=10)
+        self.status = ttk.Label(left, text="Ready (Click 'Update Preview')", foreground="#2ecc71"); self.status.pack(pady=10)
 
         # --- Right Panel ---
         right = ttk.Frame(self.paned, padding="5"); self.paned.add(right, weight=2)
         self.fig = plt.figure(figsize=(7, 7))
         self.ax = self.fig.add_subplot(111, projection='3d')
+        self.ax.text2D(0.5, 0.5, "Click 'Update Preview'", transform=self.ax.transAxes, ha="center")
         self.canvas = FigureCanvasTkAgg(self.fig, master=right)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -129,13 +126,13 @@ class TPMSUtility:
             voxels_per_wall = thk / voxel_size
             
             if voxels_per_wall < 1.0:
-                self.lbl_safe.config(text=f"[CRITICAL] Wall < 1 pixel ({voxels_per_wall:.1f}). Structure will break.", foreground="red")
+                self.lbl_safe.config(text=f"[CRITICAL] Export Wall < 1 voxel ({voxels_per_wall:.1f}). Holes guaranteed.", foreground="red")
             elif voxels_per_wall < 2.0:
-                self.lbl_safe.config(text=f"[UNSAFE] {voxels_per_wall:.1f} voxels/wall. Gaps likely.", foreground="#d35400")
+                self.lbl_safe.config(text=f"[RISKY] Export Wall {voxels_per_wall:.1f} voxels. Gaps possible.", foreground="#d35400")
             elif voxels_per_wall < 3.0:
-                self.lbl_safe.config(text=f"[OKAY] {voxels_per_wall:.1f} voxels/wall. Minor artifacts.", foreground="#f39c12")
+                self.lbl_safe.config(text=f"[OKAY] Export Wall {voxels_per_wall:.1f} voxels.", foreground="#f39c12")
             else:
-                self.lbl_safe.config(text=f"[SAFE] {voxels_per_wall:.1f} voxels/wall.", foreground="#27ae60")
+                self.lbl_safe.config(text=f"[SAFE] Export Wall {voxels_per_wall:.1f} voxels.", foreground="#27ae60")
         except: pass
 
     def set_safe_res(self):
@@ -180,11 +177,23 @@ class TPMSUtility:
         return field, grad
 
     def refresh_3d_preview(self):
-        self.status.config(text="Generating Smooth Preview...", foreground="blue")
+        self.status.config(text="Computing Mesh...", foreground="blue")
         self.root.update()
         
-        p_res = 32 
         L, W, H = self.dim_x.get(), self.dim_y.get(), self.dim_z.get()
+        thk = self.thickness.get()
+        
+        # --- ADAPTIVE RESOLUTION LOGIC ---
+        # We need at least 2 voxels to cover the wall thickness to avoid holes
+        # Max dimension divided by (thickness / 2.0) gives us the safe resolution
+        if thk > 0:
+            calc_res = int(max(L, W, H) / (thk / 2.2))
+        else:
+            calc_res = 32
+            
+        # Clamp resolution: Min 30 (for shape), Max 90 (for matplotlib performance)
+        p_res = max(30, min(90, calc_res))
+        
         x = np.linspace(-L/2, L/2, p_res); y = np.linspace(-W/2, W/2, p_res); z = np.linspace(-H/2, H/2, p_res)
         X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
         
@@ -198,6 +207,7 @@ class TPMSUtility:
             try:
                 verts, faces, _, _ = measure.marching_cubes(f_grid, level=0)
                 
+                # Rescale
                 verts[:, 0] = verts[:, 0] * (L / (p_res-1)) - L/2
                 verts[:, 1] = verts[:, 1] * (W / (p_res-1)) - W/2
                 verts[:, 2] = verts[:, 2] * (H / (p_res-1)) - H/2
@@ -206,10 +216,18 @@ class TPMSUtility:
                 norm = Normalize(vmin=-H/2, vmax=H/2)
                 colors = cm.viridis(norm(z_vals))
                 
-                mesh = Poly3DCollection(verts[faces], facecolors=colors, alpha=1.0, edgecolor='none')
+                # Add lighting to make holes/depth easier to distinguish
+                ls = LightSource(azdeg=225, altdeg=45)
+                # Note: Matplotlib's shade=True with facecolors can be tricky, 
+                # so we stick to simple facecolors + edgecolors for clarity
+                
+                mesh = Poly3DCollection(verts[faces], facecolors=colors, alpha=1.0, 
+                                        edgecolors='black', linewidths=0.1)
                 self.ax.add_collection3d(mesh)
+                self.ax.set_title(f"Preview (Res: {p_res}x{p_res}x{p_res})")
             except:
-                 self.status.config(text="Empty Field", foreground="red")
+                 self.status.config(text="Resolution Too Low for Thickness", foreground="red")
+                 self.ax.text2D(0.5, 0.5, "Structure too thin for preview.\nIncrease Thickness or Dim.", transform=self.ax.transAxes, ha="center", color="red")
         else:
              self.ax.text(0,0,0, "Install scikit-image for smooth mode", c='red')
 
@@ -221,7 +239,7 @@ class TPMSUtility:
 
     def process(self, fmt):
         if not HAS_SKIMAGE:
-            messagebox.showerror("Error", "Exporting smooth meshes requires scikit-image.\nPlease install it via 'pip install scikit-image'")
+            messagebox.showerror("Error", "Exporting smooth meshes requires scikit-image.")
             return
 
         try:
